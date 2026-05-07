@@ -1,98 +1,143 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { StyleSheet, Text, View } from 'react-native';
 import { Link } from 'expo-router';
 
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+import { Card, Hero, Kicker, Page, PressableOpacity, ProgressRule } from '@/src/components/ui';
+import { useAppData } from '@/src/data';
+import { formatDayHeading, todayIso } from '@/src/lib/date';
+import { formatINR } from '@/src/lib/currency';
+import { colors, spacing, typography } from '@/src/theme';
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+export default function HomeScreen() {
+  const { data } = useAppData();
+  const netWorth = data.ribbons.reduce((sum, ribbon) => sum + Number(ribbon.amount || 0), 0);
+  const sortedLoans = [...data.loanTrackerItems].sort((left, right) => right.amountLeftValue - left.amountLeftValue);
+
+  return (
+    <Page>
+      <Text style={styles.pageKicker}>FINANCE / HEALTH</Text>
+      <Text style={styles.heading}>{formatDayHeading(todayIso())}</Text>
+
+      <Kicker>Net Worth</Kicker>
+      <Hero value={formatINR(netWorth)} label="Local-only dashboard" />
+
+      <Kicker>Accounts</Kicker>
+      <View style={styles.list}>
+        {data.ribbons.map((ribbon) => (
+          <View key={ribbon.bank} style={styles.row}>
+            <View style={[styles.dot, { backgroundColor: ribbon.stripe }]} />
+            <View style={styles.rowCopy}>
+              <Text style={styles.rowTitle}>{ribbon.bank}</Text>
+              <Text style={styles.rowMeta}>{ribbon.account === 'Cash' ? 'Cash' : `•••• ${ribbon.account}`}</Text>
+            </View>
+            <Text style={styles.rowAmount}>{formatINR(Number(ribbon.amount || 0))}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Kicker>Loans</Kicker>
+      <View style={styles.cards}>
+        {sortedLoans.map((loan) => (
+          <Link key={loan.id} href={`/loan/${loan.id}`} asChild>
+            <PressableOpacity>
+              <Card>
+                <View style={styles.loanHead}>
+                  <View>
+                    <Text style={styles.rowTitle}>{loan.title}</Text>
+                    <Text style={styles.rowMeta}>{loan.lender}</Text>
+                  </View>
+                  <Text style={styles.rowAmount}>{loan.amountLeft}</Text>
+                </View>
+                <ProgressRule progress={loan.progress} />
+                <Text style={styles.loanSupport}>
+                  {loan.progressLabel} · {loan.support}
+                </Text>
+              </Card>
+            </PressableOpacity>
+          </Link>
+        ))}
+      </View>
+
+      <Kicker>Cards & Owed</Kicker>
+      <View style={styles.list}>
+        {data.creditCards.map((card) => (
+          <View key={card.name} style={styles.row}>
+            <View style={styles.rowCopy}>
+              <Text style={styles.rowTitle}>{card.name}</Text>
+              <Text style={styles.rowMeta}>{card.note}</Text>
+            </View>
+            <Text style={styles.rowAmount}>{formatINR(card.amount)}</Text>
+          </View>
+        ))}
+        {data.peopleToGiveMoney.map((person) => (
+          <View key={person.name} style={styles.row}>
+            <View style={styles.rowCopy}>
+              <Text style={styles.rowTitle}>{person.name}</Text>
+              <Text style={styles.rowMeta}>Pending personal payment</Text>
+            </View>
+            <Text style={styles.rowAmount}>{formatINR(person.amount)}</Text>
+          </View>
+        ))}
+      </View>
+    </Page>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  pageKicker: {
+    ...typography.kicker,
+    color: colors.inkMuted,
+  },
+  heading: {
+    ...typography.heading,
+    color: colors.ink,
+    marginTop: spacing.xs,
+  },
+  list: {
+    borderTopColor: colors.rule,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  row: {
     alignItems: 'center',
-    gap: 8,
+    borderBottomColor: colors.rule,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 56,
+    paddingVertical: spacing.sm,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  dot: {
+    borderRadius: 2,
+    height: 4,
+    width: 4,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  rowCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  rowTitle: {
+    ...typography.subhead,
+    color: colors.ink,
+  },
+  rowMeta: {
+    ...typography.caption,
+    color: colors.inkMuted,
+  },
+  rowAmount: {
+    ...typography.metricSm,
+    color: colors.ink,
+  },
+  cards: {
+    gap: spacing.sm,
+  },
+  loanHead: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  loanSupport: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    marginTop: spacing.sm,
   },
 });
