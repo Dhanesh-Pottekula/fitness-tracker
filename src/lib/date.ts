@@ -50,6 +50,51 @@ export function formatHHMM(date = new Date()): string {
   return `${h}:${m}`;
 }
 
+export function lastNMonthsKeys(n: number, end = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+export function daysInMonth(monthKey: string): number {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
+export function isoDatesInMonth(monthKey: string): string[] {
+  const total = daysInMonth(monthKey);
+  return Array.from({ length: total }, (_, i) => `${monthKey}-${String(i + 1).padStart(2, '0')}`);
+}
+
+export function formatMonthAbbrev(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-IN', { month: 'short' }).format(new Date(year, month - 1, 1));
+}
+
+export function formatMonthAbbrevYear(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(new Date(year, month - 1, 1));
+}
+
+export function formatMonthDay(iso: string): string {
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(new Date(year, month - 1, day));
+}
+
+export function formatWeekdayDay(iso: string): string {
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-IN', { weekday: 'short', month: 'short', day: 'numeric' }).format(
+    new Date(year, month - 1, day),
+  );
+}
+
+export function dayOfMonth(iso: string): number {
+  return Number(iso.split('-')[2]);
+}
+
 export function suggestMealLabel(date = new Date()): string {
   const h = date.getHours();
   if (h >= 5 && h < 11) return 'Breakfast';

@@ -11,6 +11,7 @@ import {
   MealCard,
   type Metric,
   MetricBarChart,
+  type Range,
   WaterTracker,
 } from '@/src/components/features/health';
 import { Fab, Kicker, PressableOpacity } from '@/src/components/ui';
@@ -26,6 +27,7 @@ export default function HealthScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMealIndex, setPickerMealIndex] = useState<number | null>(null);
   const [metric, setMetric] = useState<Metric>('kcal');
+  const [range, setRange] = useState<Range>('week');
 
   const { width } = useWindowDimensions();
   const chartWidth = width - spacing.lg * 2;
@@ -62,6 +64,27 @@ export default function HealthScreen() {
   function deleteMeal(index: number) {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
     updateEntry({ meals: entry.meals.filter((_, i) => i !== index) });
+  }
+
+  function saveMealAsTemplate(mealIndex: number, name: string) {
+    const meal = entry.meals[mealIndex];
+    if (!meal || meal.items.length === 0) return;
+    setData((prev) => ({
+      ...prev,
+      physicalHealth: {
+        ...prev.physicalHealth,
+        mealTemplates: [
+          ...(prev.physicalHealth.mealTemplates ?? []),
+          {
+            id: `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            label: meal.label,
+            items: meal.items.map(({ foodId, grams }) => ({ foodId, grams })),
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      },
+    }));
   }
 
   function openNewMeal() {
@@ -134,15 +157,18 @@ export default function HealthScreen() {
                 foodsById={foodsByIdMap}
                 onAddItems={openAddItems}
                 onDelete={deleteMeal}
+                onSaveAsTemplate={saveMealAsTemplate}
               />
             ))}
           </View>
         )}
 
-        <Kicker>Trends · last 7 days</Kicker>
+        <Kicker>Trends</Kicker>
         <MetricBarChart
           metric={metric}
           onMetricChange={setMetric}
+          range={range}
+          onRangeChange={setRange}
           physicalHealth={data.physicalHealth}
           selectedDate={date}
           onSelectDate={setDate}

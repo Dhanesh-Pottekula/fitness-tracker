@@ -75,6 +75,7 @@ export const SEED: AppData = {
       { id: 'paneer', name: 'Paneer', kcal: 265, protein: 18, carbs: 1.2, fats: 21 },
     ],
     daily: {},
+    mealTemplates: [],
   },
   monthlySpends: {},
 };

@@ -1,23 +1,42 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Dimensions,
   FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  FadeOut,
+  LinearTransition,
+  SlideInRight,
+  interpolate,
+  interpolateColor,
+  type SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PressableOpacity } from '@/src/components/ui';
 import { useAppData } from '@/src/data';
-import type { Food, MealItem } from '@/src/data/types';
+import type { Food, MealItem, MealTemplate } from '@/src/data/types';
 import { formatHHMM, suggestMealLabel } from '@/src/lib/date';
 import {
   defaultQuantity,
@@ -66,6 +85,12 @@ export function FoodPickerSheet({
   const [qtyByFood, setQtyByFood] = useState<Record<string, string>>({});
   const [customOpen, setCustomOpen] = useState(false);
   const [customDraft, setCustomDraft] = useState({ name: '', kcal: '', protein: '', carbs: '', fats: '' });
+  const saving = useSharedValue(0);
+  const sheetY = useSharedValue(0);
+  const cartScrollRef = useRef<ScrollView>(null);
+  const [templateNameDraft, setTemplateNameDraft] = useState('');
+  const [templateInputOpen, setTemplateInputOpen] = useState(false);
+  const templates = data.physicalHealth.mealTemplates ?? [];
 
   useEffect(() => {
     if (!visible) return;
@@ -82,7 +107,11 @@ export function FoodPickerSheet({
     setCustomOpen(false);
     setCustomDraft({ name: '', kcal: '', protein: '', carbs: '', fats: '' });
     setQtyByFood({});
-  }, [visible, existingMeal]);
+    setTemplateInputOpen(false);
+    setTemplateNameDraft('');
+    saving.value = 0;
+    sheetY.value = 0;
+  }, [visible, existingMeal, saving, sheetY]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -134,6 +163,9 @@ export function FoodPickerSheet({
       }
       return [...prev, { foodId: food.id, grams }];
     });
+    requestAnimationFrame(() => {
+      cartScrollRef.current?.scrollToEnd({ animated: true });
+    });
   }
 
   function updateCartQuantity(idx: number, value: string) {
@@ -152,6 +184,66 @@ export function FoodPickerSheet({
   function removeFromCart(idx: number) {
     Haptics.selectionAsync().catch(() => undefined);
     setCart((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function applyTemplate(template: MealTemplate) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    setLabel(template.label || label);
+    setCart((prev) => {
+      const merged = [...prev];
+      template.items.forEach((it) => {
+        const existing = merged.findIndex((c) => c.foodId === it.foodId);
+        if (existing >= 0) merged[existing] = { ...merged[existing], grams: merged[existing].grams + it.grams };
+        else merged.push({ foodId: it.foodId, grams: it.grams });
+      });
+      return merged;
+    });
+    requestAnimationFrame(() => {
+      cartScrollRef.current?.scrollToEnd({ animated: true });
+    });
+  }
+
+  function saveAsTemplate() {
+    const name = templateNameDraft.trim();
+    if (!name) return;
+    const cleaned = cart.filter((item) => Number(item.grams) > 0);
+    if (cleaned.length === 0) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    const newTemplate: MealTemplate = {
+      id: `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      label,
+      items: cleaned.map(({ foodId, grams }) => ({ foodId, grams })),
+      createdAt: new Date().toISOString(),
+    };
+    setData((prev) => ({
+      ...prev,
+      physicalHealth: {
+        ...prev.physicalHealth,
+        mealTemplates: [...(prev.physicalHealth.mealTemplates ?? []), newTemplate],
+      },
+    }));
+    setTemplateInputOpen(false);
+    setTemplateNameDraft('');
+  }
+
+  function confirmDeleteTemplate(template: MealTemplate) {
+    Alert.alert(template.name, 'Remove this template?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setData((prev) => ({
+            ...prev,
+            physicalHealth: {
+              ...prev.physicalHealth,
+              mealTemplates: (prev.physicalHealth.mealTemplates ?? []).filter((t) => t.id !== template.id),
+            },
+          }));
+        },
+      },
+    ]);
   }
 
   function saveCustomFood() {
@@ -183,53 +275,94 @@ export function FoodPickerSheet({
   }
 
   function saveMeal() {
+    if (saving.value > 0) return;
     const cleaned = cart.filter((item) => Number(item.grams) > 0);
     if (cleaned.length === 0) return;
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+
+    saving.value = withSequence(
+      withTiming(0.5, { duration: 180 }),
+      withTiming(1, { duration: 280, easing: Easing.bezier(0.34, 1.56, 0.64, 1) }),
+    );
+
     const items: MealItem[] = cleaned.map(({ foodId, grams }) => ({ foodId, grams }));
-    setData((prev) => {
-      const existing = prev.physicalHealth.daily[date] ?? { water: 0, weight: 0, meals: [] };
-      const meals = [...existing.meals];
-      if (isEditing && mealIndex !== null) {
-        meals[mealIndex] = { time, label, items };
-      } else {
-        meals.push({ time, label, items });
-      }
-      return {
-        ...prev,
-        physicalHealth: {
-          ...prev.physicalHealth,
-          daily: {
-            ...prev.physicalHealth.daily,
-            [date]: { ...existing, meals },
+
+    setTimeout(() => {
+      setData((prev) => {
+        const existing = prev.physicalHealth.daily[date] ?? { water: 0, weight: 0, meals: [] };
+        const meals = [...existing.meals];
+        if (isEditing && mealIndex !== null) {
+          meals[mealIndex] = { time, label, items };
+        } else {
+          meals.push({ time, label, items });
+        }
+        return {
+          ...prev,
+          physicalHealth: {
+            ...prev.physicalHealth,
+            daily: {
+              ...prev.physicalHealth.daily,
+              [date]: { ...existing, meals },
+            },
           },
-        },
-      };
-    });
-    onClose();
+        };
+      });
+    }, 240);
+
+    setTimeout(onClose, 760);
   }
+
+  const dismissThreshold = SHEET_HEIGHT * 0.22;
+
+  const dragGesture = Gesture.Pan()
+    .activeOffsetY(8)
+    .failOffsetY(-8)
+    .onUpdate((e) => {
+      sheetY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      if (e.translationY > dismissThreshold || e.velocityY > 900) {
+        sheetY.value = withTiming(SHEET_HEIGHT, { duration: 220 }, (finished) => {
+          if (finished) scheduleOnRN(onClose);
+        });
+      } else {
+        sheetY.value = withSpring(0, { damping: 22, stiffness: 240, mass: 0.6 });
+      }
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sheetY.value }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: 1 - sheetY.value / SHEET_HEIGHT,
+  }));
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+      <Animated.View style={[styles.backdrop, backdropStyle]}>
+        <Pressable style={styles.backdropTap} onPress={onClose} />
+        <Animated.View style={[styles.sheet, sheetStyle]}>
           <SafeAreaView edges={['bottom']} style={styles.safe}>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.flex}>
-              <View style={styles.handle} />
+              <GestureDetector gesture={dragGesture}>
+                <View collapsable={false}>
+                  <View style={styles.handle} />
 
-              <View style={styles.head}>
-                <View>
-                  <Text style={styles.eyebrow}>{isEditing ? 'EDIT MEAL' : 'NEW MEAL'}</Text>
-                  <Text style={styles.title}>{label}</Text>
-                </View>
-                <PressableOpacity onPress={onClose} style={styles.closeBtn}>
-                  <Ionicons name="close" size={22} color={colors.inkMuted} />
-                </PressableOpacity>
-              </View>
+                  <View style={styles.head}>
+                    <View>
+                      <Text style={styles.eyebrow}>{isEditing ? 'EDIT MEAL' : 'NEW MEAL'}</Text>
+                      <Text style={styles.title}>{label}</Text>
+                    </View>
+                    <PressableOpacity onPress={onClose} style={styles.closeBtn}>
+                      <Ionicons name="close" size={22} color={colors.inkMuted} />
+                    </PressableOpacity>
+                  </View>
 
-              <View style={styles.metaRow}>
+                  <View style={styles.metaRow}>
                 <View style={styles.metaCell}>
                   <Text style={styles.metaLabel}>TIME</Text>
                   <TextInput
@@ -257,7 +390,29 @@ export function FoodPickerSheet({
                     })}
                   </View>
                 </View>
-              </View>
+                  </View>
+                </View>
+              </GestureDetector>
+
+              {templates.length > 0 ? (
+                <View style={styles.templateStrip}>
+                  <Text style={styles.templateStripLabel}>TEMPLATES</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.templateScroll}>
+                    {templates.map((tpl) => (
+                      <TemplateChip
+                        key={tpl.id}
+                        template={tpl}
+                        foodsByIdMap={foodsByIdMap}
+                        onApply={() => applyTemplate(tpl)}
+                        onLongPress={() => confirmDeleteTemplate(tpl)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
 
               <View style={styles.searchWrap}>
                 <Ionicons name="search" size={16} color={colors.inkMuted} />
@@ -282,13 +437,25 @@ export function FoodPickerSheet({
                 contentContainerStyle={styles.listContent}
                 keyboardShouldPersistTaps="handled"
                 ListHeaderComponent={
-                  <CartPreview
-                    cart={cart}
-                    foodsByIdMap={foodsByIdMap}
-                    totals={cartTotals}
-                    onChangeQuantity={updateCartQuantity}
-                    onRemove={removeFromCart}
-                  />
+                  <View>
+                    <CartPreview
+                      cart={cart}
+                      foodsByIdMap={foodsByIdMap}
+                      totals={cartTotals}
+                      scrollRef={cartScrollRef}
+                      onChangeQuantity={updateCartQuantity}
+                      onRemove={removeFromCart}
+                    />
+                    {cart.length > 0 ? (
+                      <SaveAsTemplateRow
+                        open={templateInputOpen}
+                        name={templateNameDraft}
+                        onToggle={() => setTemplateInputOpen((v) => !v)}
+                        onChangeName={setTemplateNameDraft}
+                        onSave={saveAsTemplate}
+                      />
+                    ) : null}
+                  </View>
                 }
                 ListFooterComponent={
                   <CustomFoodFooter
@@ -319,17 +486,17 @@ export function FoodPickerSheet({
                     {cart.length} {cart.length === 1 ? 'item' : 'items'} · {Math.round(cartTotals.kcal)} kcal
                   </Text>
                 </View>
-                <PressableOpacity
-                  onPress={saveMeal}
+                <AnimatedSaveButton
+                  saving={saving}
+                  label={isEditing ? 'Update Meal' : 'Save Meal'}
                   disabled={cart.length === 0}
-                  style={[styles.saveBtn, cart.length === 0 && styles.saveBtnDisabled]}>
-                  <Text style={styles.saveText}>{isEditing ? 'Update Meal' : 'Save Meal'}</Text>
-                </PressableOpacity>
+                  onPress={saveMeal}
+                />
               </View>
             </KeyboardAvoidingView>
           </SafeAreaView>
-        </Pressable>
-      </Pressable>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -338,12 +505,14 @@ function CartPreview({
   cart,
   foodsByIdMap,
   totals,
+  scrollRef,
   onChangeQuantity,
   onRemove,
 }: {
   cart: DraftItem[];
   foodsByIdMap: Record<string, Food>;
   totals: { kcal: number; protein: number; carbs: number; fats: number };
+  scrollRef: React.RefObject<ScrollView | null>;
   onChangeQuantity: (idx: number, value: string) => void;
   onRemove: (idx: number) => void;
 }) {
@@ -356,7 +525,7 @@ function CartPreview({
   }
 
   return (
-    <View style={cartStyles.card}>
+    <Animated.View style={cartStyles.card} layout={LinearTransition.duration(220)}>
       <View style={cartStyles.head}>
         <Text style={cartStyles.eyebrow}>IN THIS MEAL · {cart.length}</Text>
         <Text style={cartStyles.kcal}>{Math.round(totals.kcal)} kcal</Text>
@@ -366,34 +535,70 @@ function CartPreview({
         <Text style={cartStyles.macroPart}>C {Math.round(totals.carbs)}</Text>
         <Text style={cartStyles.macroPart}>F {Math.round(totals.fats)}</Text>
       </View>
-      <View style={cartStyles.items}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={cartStyles.scrollContent}>
         {cart.map((item, idx) => {
           const food = foodsByIdMap[item.foodId];
-          const qty = food ? gramsToQuantity(item.grams, food) : item.grams;
-          const unitLabel = food ? quantityUnit(food) : 'g';
           return (
-            <View key={`${item.foodId}-${idx}`} style={cartStyles.row}>
-              <Text style={cartStyles.name} numberOfLines={1}>
-                {food?.name ?? item.foodId}
-              </Text>
-              <View style={cartStyles.rowRight}>
-                <TextInput
-                  value={String(qty)}
-                  onChangeText={(v) => onChangeQuantity(idx, v)}
-                  keyboardType="decimal-pad"
-                  style={cartStyles.gramsInput}
-                  selectTextOnFocus
-                />
-                <Text style={cartStyles.unit}>{unitLabel}</Text>
-                <PressableOpacity onPress={() => onRemove(idx)} hitSlop={8} style={cartStyles.removeBtn}>
-                  <Ionicons name="close" size={16} color={colors.inkMuted} />
-                </PressableOpacity>
-              </View>
-            </View>
+            <CartChip
+              key={`${item.foodId}-${idx}`}
+              item={item}
+              food={food}
+              onChangeQuantity={(v) => onChangeQuantity(idx, v)}
+              onRemove={() => onRemove(idx)}
+            />
           );
         })}
+      </ScrollView>
+    </Animated.View>
+  );
+}
+
+function CartChip({
+  item,
+  food,
+  onChangeQuantity,
+  onRemove,
+}: {
+  item: DraftItem;
+  food: Food | undefined;
+  onChangeQuantity: (value: string) => void;
+  onRemove: () => void;
+}) {
+  const qty = food ? gramsToQuantity(item.grams, food) : item.grams;
+  const unit = food ? quantityUnit(food) : 'g';
+  const m = food ? itemMacros(item, { [item.foodId]: food }) : { kcal: 0 };
+
+  return (
+    <Animated.View
+      entering={SlideInRight.duration(280).easing(Easing.out(Easing.cubic))}
+      exiting={FadeOut.duration(160)}
+      layout={LinearTransition.duration(220)}
+      style={chipStyles.chip}>
+      <View style={chipStyles.top}>
+        <Text style={chipStyles.name} numberOfLines={1}>
+          {food?.name ?? item.foodId}
+        </Text>
+        <PressableOpacity onPress={onRemove} hitSlop={6} style={chipStyles.close}>
+          <Ionicons name="close" size={12} color={colors.inkMuted} />
+        </PressableOpacity>
       </View>
-    </View>
+      <View style={chipStyles.qtyRow}>
+        <TextInput
+          value={String(qty)}
+          onChangeText={onChangeQuantity}
+          keyboardType="decimal-pad"
+          style={chipStyles.qtyInput}
+          selectTextOnFocus
+        />
+        <Text style={chipStyles.unit}>{unit}</Text>
+      </View>
+      <Text style={chipStyles.kcal}>{Math.round(m.kcal)} kcal</Text>
+    </Animated.View>
   );
 }
 
@@ -431,9 +636,7 @@ function FoodRow({
           />
           <Text style={foodStyles.unit}>{unitLabel}</Text>
         </View>
-        <PressableOpacity onPress={onAdd} style={foodStyles.addBtn}>
-          <Ionicons name="add" size={18} color={colors.paperRaised} />
-        </PressableOpacity>
+        <AnimatedAddButton onPress={onAdd} />
       </View>
     </View>
   );
@@ -512,6 +715,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(29,29,31,0.36)',
     justifyContent: 'flex-end',
+  },
+  backdropTap: {
+    flex: 1,
   },
   sheet: {
     height: SHEET_HEIGHT,
@@ -629,6 +835,20 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { backgroundColor: colors.rule },
   saveText: { ...typography.subhead, color: colors.paperRaised },
+  templateStrip: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xs,
+    gap: 6,
+  },
+  templateStripLabel: {
+    ...typography.kicker,
+    color: colors.inkMuted,
+    fontSize: 10,
+  },
+  templateScroll: {
+    gap: 8,
+    paddingRight: spacing.lg,
+  },
 });
 
 const cartStyles = StyleSheet.create({
@@ -650,33 +870,12 @@ const cartStyles = StyleSheet.create({
   head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   eyebrow: { ...typography.kicker, color: colors.clay },
   kcal: { ...typography.metric, fontSize: 18, color: colors.clay },
-  macroLine: { flexDirection: 'row', gap: spacing.md },
+  macroLine: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.xs },
   macroPart: { ...typography.caption, color: colors.inkSoft, fontVariant: ['tabular-nums'] },
-  items: { gap: 0 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 36,
-    borderTopColor: colors.rule,
-    borderTopWidth: StyleSheet.hairlineWidth,
+  scrollContent: {
     paddingTop: 6,
-  },
-  name: { ...typography.body, color: colors.ink, flex: 1, paddingRight: spacing.xs },
-  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  gramsInput: {
-    ...typography.metricSm,
-    color: colors.ink,
-    minWidth: 44,
-    textAlign: 'right',
-    paddingVertical: 0,
-  },
-  unit: { ...typography.caption, color: colors.inkMuted },
-  removeBtn: {
-    minHeight: 32,
-    minWidth: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 8,
+    paddingRight: spacing.xs,
   },
 });
 
@@ -761,5 +960,481 @@ const customStyles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   saveText: { ...typography.subhead, fontSize: 13, color: colors.paperRaised },
+});
+
+// =============================================================
+// Templates
+// =============================================================
+
+function TemplateChip({
+  template,
+  foodsByIdMap,
+  onApply,
+  onLongPress,
+}: {
+  template: MealTemplate;
+  foodsByIdMap: Record<string, Food>;
+  onApply: () => void;
+  onLongPress: () => void;
+}) {
+  const totals = template.items.reduce(
+    (acc, item) => {
+      const m = itemMacros(item, foodsByIdMap);
+      return { kcal: acc.kcal + m.kcal };
+    },
+    { kcal: 0 },
+  );
+  return (
+    <Pressable onPress={onApply} onLongPress={onLongPress} delayLongPress={350}>
+      <View style={tplStyles.chip}>
+        <View style={tplStyles.row}>
+          <Ionicons name="bookmark" size={11} color={colors.clay} />
+          <Text style={tplStyles.label}>{(template.label || 'MEAL').toUpperCase()}</Text>
+        </View>
+        <Text style={tplStyles.name} numberOfLines={1}>
+          {template.name}
+        </Text>
+        <Text style={tplStyles.meta} numberOfLines={1}>
+          {template.items.length} {template.items.length === 1 ? 'item' : 'items'} ·{' '}
+          {Math.round(totals.kcal)} kcal
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function SaveAsTemplateRow({
+  open,
+  name,
+  onToggle,
+  onChangeName,
+  onSave,
+}: {
+  open: boolean;
+  name: string;
+  onToggle: () => void;
+  onChangeName: (value: string) => void;
+  onSave: () => void;
+}) {
+  if (!open) {
+    return (
+      <PressableOpacity onPress={onToggle} style={tplStyles.openRow} hitSlop={6}>
+        <Ionicons name="bookmark-outline" size={14} color={colors.clay} />
+        <Text style={tplStyles.openText}>Save this as a template</Text>
+      </PressableOpacity>
+    );
+  }
+  return (
+    <View style={tplStyles.formRow}>
+      <TextInput
+        autoFocus
+        value={name}
+        onChangeText={onChangeName}
+        placeholder="Template name"
+        placeholderTextColor={colors.inkMuted}
+        style={tplStyles.formInput}
+        returnKeyType="done"
+        onSubmitEditing={onSave}
+      />
+      <PressableOpacity onPress={onToggle} style={tplStyles.formCancel} hitSlop={6}>
+        <Text style={tplStyles.formCancelText}>Cancel</Text>
+      </PressableOpacity>
+      <PressableOpacity
+        onPress={onSave}
+        disabled={!name.trim()}
+        style={[tplStyles.formSave, !name.trim() && tplStyles.formSaveDisabled]}>
+        <Text style={tplStyles.formSaveText}>Save</Text>
+      </PressableOpacity>
+    </View>
+  );
+}
+
+const tplStyles = StyleSheet.create({
+  chip: {
+    width: 156,
+    minHeight: 70,
+    backgroundColor: colors.paperRaised,
+    borderColor: colors.rule,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 10,
+    gap: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  label: {
+    ...typography.kicker,
+    color: colors.clay,
+    fontSize: 9,
+  },
+  name: {
+    ...typography.subhead,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  meta: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+  },
+  openRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: 36,
+    marginTop: 4,
+    marginBottom: spacing.xs,
+  },
+  openText: {
+    ...typography.caption,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.clay,
+  },
+  formRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: spacing.xs,
+  },
+  formInput: {
+    ...typography.body,
+    flex: 1,
+    color: colors.ink,
+    borderBottomColor: colors.rule,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 6,
+  },
+  formCancel: {
+    minHeight: 36,
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+  },
+  formCancelText: {
+    ...typography.caption,
+    fontSize: 13,
+    color: colors.inkMuted,
+  },
+  formSave: {
+    backgroundColor: colors.clay,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formSaveDisabled: {
+    backgroundColor: colors.rule,
+  },
+  formSaveText: {
+    ...typography.subhead,
+    fontSize: 13,
+    color: colors.paperRaised,
+  },
+});
+
+// =============================================================
+// Animated subcomponents
+// =============================================================
+
+function AnimatedAddButton({ onPress }: { onPress: () => void }) {
+  const success = useSharedValue(0);
+  const ripple = useSharedValue(0);
+
+  function handlePress() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    onPress();
+    success.value = withSequence(
+      withTiming(1, { duration: 220, easing: Easing.bezier(0.34, 1.56, 0.64, 1) }),
+      withDelay(360, withTiming(0, { duration: 240 })),
+    );
+    ripple.value = 0;
+    ripple.value = withTiming(1, { duration: 520, easing: Easing.out(Easing.quad) });
+  }
+
+  const buttonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + success.value * 0.18 }],
+    backgroundColor: interpolateColor(success.value, [0, 1], [colors.clay, colors.sage]),
+  }));
+
+  const plusStyle = useAnimatedStyle(() => ({
+    opacity: 1 - success.value,
+    transform: [{ scale: 1 - success.value * 0.4 }],
+  }));
+
+  const checkStyle = useAnimatedStyle(() => ({
+    opacity: success.value,
+    transform: [{ scale: 0.5 + success.value * 0.5 }],
+  }));
+
+  const rippleStyle = useAnimatedStyle(() => ({
+    opacity: 0.45 * (1 - ripple.value),
+    transform: [{ scale: 0.6 + ripple.value * 1.3 }],
+  }));
+
+  return (
+    <Pressable onPress={handlePress} hitSlop={6}>
+      <View style={addBtnStyles.wrap}>
+        <Animated.View style={[addBtnStyles.ripple, rippleStyle]} pointerEvents="none" />
+        <Animated.View style={[addBtnStyles.btn, buttonStyle]}>
+          <Animated.View style={[addBtnStyles.iconLayer, plusStyle]} pointerEvents="none">
+            <Ionicons name="add" size={18} color={colors.paperRaised} />
+          </Animated.View>
+          <Animated.View style={[addBtnStyles.iconLayer, checkStyle]} pointerEvents="none">
+            <Ionicons name="checkmark" size={18} color={colors.paperRaised} />
+          </Animated.View>
+        </Animated.View>
+      </View>
+    </Pressable>
+  );
+}
+
+const SAVE_WIDTH = 144;
+const SAVE_COLLAPSED = 56;
+
+function AnimatedSaveButton({
+  saving,
+  label,
+  disabled,
+  onPress,
+}: {
+  saving: SharedValue<number>;
+  label: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const buttonStyle = useAnimatedStyle(() => ({
+    width: interpolate(saving.value, [0, 0.5, 1], [SAVE_WIDTH, SAVE_WIDTH, SAVE_COLLAPSED]),
+    backgroundColor: interpolateColor(
+      saving.value,
+      [0, 0.5, 1],
+      [disabled ? colors.rule : colors.clay, disabled ? colors.rule : colors.clay, colors.sage],
+    ),
+  }));
+
+  const textStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(saving.value, [0, 0.5], [1, 0], 'clamp'),
+  }));
+
+  const checkStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(saving.value, [0.5, 1], [0, 1], 'clamp'),
+    transform: [{ scale: interpolate(saving.value, [0.5, 1], [0.4, 1], 'clamp') }],
+  }));
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(saving.value, [0.5, 0.9, 1], [0, 0.45, 0]),
+    transform: [{ scale: interpolate(saving.value, [0.5, 1], [0.6, 1.7]) }],
+  }));
+
+  return (
+    <View style={saveBtnStyles.wrap}>
+      <Particles trigger={saving} />
+      <Pressable onPress={onPress} disabled={disabled}>
+        <Animated.View style={[saveBtnStyles.glow, glowStyle]} pointerEvents="none" />
+        <Animated.View style={[saveBtnStyles.btn, buttonStyle]}>
+          <Animated.Text style={[saveBtnStyles.text, textStyle]} numberOfLines={1}>
+            {label}
+          </Animated.Text>
+          <Animated.View style={[saveBtnStyles.checkLayer, checkStyle]} pointerEvents="none">
+            <Ionicons name="checkmark" size={26} color={colors.paperRaised} />
+          </Animated.View>
+        </Animated.View>
+      </Pressable>
+    </View>
+  );
+}
+
+function Particles({ trigger }: { trigger: SharedValue<number> }) {
+  const count = 10;
+  return (
+    <View style={particleStyles.field} pointerEvents="none">
+      {Array.from({ length: count }, (_, i) => (
+        <Particle key={i} index={i} total={count} trigger={trigger} />
+      ))}
+    </View>
+  );
+}
+
+const PARTICLE_COLORS = [colors.clay, colors.sage, colors.ochre];
+
+function Particle({
+  index,
+  total,
+  trigger,
+}: {
+  index: number;
+  total: number;
+  trigger: SharedValue<number>;
+}) {
+  const angle = (index / total) * Math.PI * 2 + (index % 2 ? 0 : Math.PI / total);
+  const distance = 36 + (index % 3) * 14;
+  const dx = Math.cos(angle) * distance;
+  const dy = Math.sin(angle) * distance;
+  const size = 5 + (index % 3);
+  const color = PARTICLE_COLORS[index % PARTICLE_COLORS.length];
+
+  const style = useAnimatedStyle(() => {
+    const t = interpolate(trigger.value, [0.5, 1], [0, 1], 'clamp');
+    return {
+      transform: [
+        { translateX: t * dx },
+        { translateY: t * dy },
+        { scale: 1 - t * 0.5 },
+      ],
+      opacity: 1 - t,
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        particleStyles.dot,
+        { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
+        style,
+      ]}
+    />
+  );
+}
+
+const addBtnStyles = StyleSheet.create({
+  wrap: {
+    height: 40,
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btn: {
+    height: 34,
+    width: 34,
+    borderRadius: 999,
+    backgroundColor: colors.clay,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  iconLayer: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ripple: {
+    position: 'absolute',
+    height: 34,
+    width: 34,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: colors.sage,
+  },
+});
+
+const chipStyles = StyleSheet.create({
+  chip: {
+    width: 132,
+    minHeight: 76,
+    backgroundColor: colors.paperRaised,
+    borderColor: colors.rule,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 10,
+    gap: 4,
+  },
+  top: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 4,
+  },
+  name: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.ink,
+    flex: 1,
+  },
+  close: {
+    height: 18,
+    width: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -2,
+    marginTop: -2,
+  },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 2,
+  },
+  qtyInput: {
+    ...typography.metric,
+    fontSize: 18,
+    color: colors.clay,
+    paddingVertical: 0,
+    minWidth: 30,
+  },
+  unit: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    fontSize: 11,
+  },
+  kcal: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+  },
+});
+
+const saveBtnStyles = StyleSheet.create({
+  wrap: {
+    width: SAVE_WIDTH,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  btn: {
+    height: 44,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  text: {
+    ...typography.subhead,
+    color: colors.paperRaised,
+  },
+  checkLayer: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glow: {
+    position: 'absolute',
+    right: 0,
+    height: 56,
+    width: 56,
+    borderRadius: 999,
+    backgroundColor: colors.sage,
+    alignSelf: 'flex-end',
+    top: -6,
+  },
+});
+
+const particleStyles = StyleSheet.create({
+  field: {
+    position: 'absolute',
+    right: SAVE_COLLAPSED / 2 - 3,
+    top: 22 - 3,
+    height: 6,
+    width: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {
+    position: 'absolute',
+  },
 });
 

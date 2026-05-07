@@ -1,6 +1,7 @@
 import { ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -31,16 +32,18 @@ const navigationTheme = {
 
 export default function RootLayout() {
   return (
-    <AppDataProvider>
-      <ThemeProvider value={navigationTheme}>
-        <SafeAreaProvider>
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="loan/[id]" options={{ presentation: 'modal' }} />
-          </Stack>
-          <StatusBar style="dark" />
-        </SafeAreaProvider>
-      </ThemeProvider>
-    </AppDataProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppDataProvider>
+        <ThemeProvider value={navigationTheme}>
+          <SafeAreaProvider>
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="loan/[id]" options={{ presentation: 'modal' }} />
+            </Stack>
+            <StatusBar style="dark" />
+          </SafeAreaProvider>
+        </ThemeProvider>
+      </AppDataProvider>
+    </GestureHandlerRootView>
   );
 }

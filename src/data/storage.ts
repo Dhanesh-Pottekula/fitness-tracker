@@ -50,6 +50,7 @@ function mergeWithSeed(stored: Partial<AppData>): AppData {
       targets: { ...seed.physicalHealth.targets, ...(physicalHealth.targets ?? {}) },
       foods: mergeFoods(physicalHealth.foods, seed.physicalHealth.foods),
       daily,
+      mealTemplates: physicalHealth.mealTemplates ?? [],
     },
     monthlySpends: mergeMonthlySpends(stored.monthlySpends),
   };

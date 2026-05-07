@@ -80,6 +80,14 @@ export interface DailyEntry {
   meals: Meal[];
 }
 
+export interface MealTemplate {
+  id: string;
+  name: string;
+  label: string;
+  items: MealItem[];
+  createdAt: string;
+}
+
 export interface PhysicalHealth {
   targets: {
     calories: number;
@@ -91,6 +99,7 @@ export interface PhysicalHealth {
   };
   foods: Food[];
   daily: Record<string, DailyEntry>;
+  mealTemplates: MealTemplate[];
 }
 
 export interface SpendEntry {
