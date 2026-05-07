@@ -14,6 +14,10 @@ export const colors = {
   target: '#a99070',
   water: '#5b8aa3',
   surfaceTint: 'rgba(182,67,42,0.06)',
+  success: '#2f8a4a',
+  danger: '#c83a3a',
+  successTint: 'rgba(47,138,74,0.08)',
+  dangerTint: 'rgba(200,58,58,0.08)',
 };
 
 export const chartCycle = [colors.clay, colors.sage, colors.ochre, colors.slate, '#8a7a9c'];

@@ -1,9 +1,12 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radius, spacing, typography } from '@/src/theme';
 
 import { PressableOpacity } from './PressableOpacity';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.9, SCREEN_HEIGHT - 40);
 
 export function BottomSheet({
   visible,
@@ -20,7 +23,7 @@ export function BottomSheet({
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
-          <SafeAreaView edges={['bottom']}>
+          <SafeAreaView edges={['bottom']} style={styles.safe}>
             <View style={styles.handle} />
             <View style={styles.head}>
               <Text style={styles.title}>{title}</Text>
@@ -28,7 +31,7 @@ export function BottomSheet({
                 <Text style={styles.closeText}>Close</Text>
               </PressableOpacity>
             </View>
-            {children}
+            <View style={styles.content}>{children}</View>
           </SafeAreaView>
         </Pressable>
       </Pressable>
@@ -48,6 +51,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.sheet,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
+    height: SHEET_HEIGHT,
+  },
+  safe: {
+    flex: 1,
   },
   handle: {
     alignSelf: 'center',
@@ -74,5 +81,8 @@ const styles = StyleSheet.create({
   closeText: {
     ...typography.subhead,
     color: colors.clay,
+  },
+  content: {
+    flex: 1,
   },
 });

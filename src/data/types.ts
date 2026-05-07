@@ -47,6 +47,7 @@ export interface FinanceTransaction {
   note: string;
   amount: number;
   paymentMethod?: string;
+  friend?: string;
 }
 
 export type FoodUnit = 'g' | 'piece';
