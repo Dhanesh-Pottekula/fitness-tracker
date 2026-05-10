@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -41,13 +41,16 @@ export function CycleMonthModal({
   const [monthKey, setMonthKey] = useState(monthKeyFromDate());
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
   const predictedSet = useMemo(() => new Set(predictedDates), [predictedDates]);
+  const wasVisible = useRef(false);
 
   useEffect(() => {
-    if (!visible) return;
-    setSelectedIso(null);
-    const periods = extractPeriods(daily);
-    const lastPeriodStart = periods.length > 0 ? periods[periods.length - 1].start : null;
-    setMonthKey(lastPeriodStart ? lastPeriodStart.slice(0, 7) : monthKeyFromDate());
+    if (visible && !wasVisible.current) {
+      setSelectedIso(null);
+      const periods = extractPeriods(daily);
+      const lastPeriodStart = periods.length > 0 ? periods[periods.length - 1].start : null;
+      setMonthKey(lastPeriodStart ? lastPeriodStart.slice(0, 7) : monthKeyFromDate());
+    }
+    wasVisible.current = visible;
   }, [visible, daily]);
 
   const cells = useMemo(() => buildMonthCells(monthKey), [monthKey]);
