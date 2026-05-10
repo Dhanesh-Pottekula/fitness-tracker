@@ -199,6 +199,116 @@ function findContainingPeriodStart(periods: PeriodSpan[], iso: string): string |
   return undefined;
 }
 
+export function findPeriodContaining(
+  periods: PeriodSpan[],
+  iso: string,
+): PeriodSpan | null {
+  for (const period of periods) {
+    if (iso >= period.start && iso <= period.end) return period;
+  }
+  return null;
+}
+
+export interface CycleStats {
+  avgCycleLength: number | null;
+  avgPeriodLength: number | null;
+  cyclesLogged: number;
+  lastPeriodStart: string | null;
+}
+
+export function cycleStats(
+  daily: Record<string, CycleDayEntry>,
+  settings: CycleSettings,
+): CycleStats {
+  const periods = extractPeriods(daily);
+  const cycles = extractCycles(daily);
+  const closed = periods.slice(0, Math.max(0, periods.length - 1));
+
+  const avgCycle = cycles.length >= 2
+    ? avgCycleLength(cycles, settings.cycleLengthHint)
+    : null;
+
+  const avgPeriod = closed.length > 0
+    ? avgPeriodLength(daily, settings.periodLengthHint)
+    : null;
+
+  return {
+    avgCycleLength: avgCycle,
+    avgPeriodLength: avgPeriod,
+    cyclesLogged: cycles.length,
+    lastPeriodStart: periods.length > 0 ? periods[periods.length - 1].start : null,
+  };
+}
+
+export function monthPeriodSpans(
+  daily: Record<string, CycleDayEntry>,
+  monthKey: string,
+): PeriodSpan[] {
+  const periods = extractPeriods(daily);
+  const monthStart = `${monthKey}-01`;
+  const [y, m] = monthKey.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const monthEnd = `${monthKey}-${String(lastDay).padStart(2, '0')}`;
+
+  const out: PeriodSpan[] = [];
+  for (const period of periods) {
+    if (period.end < monthStart) continue;
+    if (period.start > monthEnd) break;
+    out.push({
+      start: period.start < monthStart ? monthStart : period.start,
+      end: period.end > monthEnd ? monthEnd : period.end,
+    });
+  }
+  return out;
+}
+
+export function applyPeriodRange(
+  daily: Record<string, CycleDayEntry>,
+  oldRange: { start: string; end: string } | null,
+  newRange: { start: string; end: string },
+  defaultFlow: FlowLevel = 'medium',
+): Record<string, CycleDayEntry> {
+  const next: Record<string, CycleDayEntry> = { ...daily };
+
+  if (oldRange) {
+    let cursor = oldRange.start;
+    while (cursor <= oldRange.end) {
+      const inNew = cursor >= newRange.start && cursor <= newRange.end;
+      if (!inNew) {
+        const existing = next[cursor];
+        if (existing) {
+          const { flow: _flow, ...rest } = existing;
+          if (Object.keys(rest).length > 0) {
+            next[cursor] = rest;
+          } else {
+            delete next[cursor];
+          }
+        }
+      }
+      cursor = addDays(cursor, 1);
+    }
+  }
+
+  let cursor = newRange.start;
+  while (cursor <= newRange.end) {
+    const existing = next[cursor];
+    if (!existing?.flow) {
+      next[cursor] = { ...(existing ?? {}), flow: existing?.flow ?? defaultFlow };
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  return next;
+}
+
+export function isValidRange(start: string, end: string): boolean {
+  return start <= end;
+}
+
+export function rangeLength(start: string, end: string): number {
+  return diffDays(start, end) + 1;
+}
+
 // ─── Display helpers ────────────────────────────────────────────────────────
 
 export function flowColor(level: FlowLevel | undefined): string {
