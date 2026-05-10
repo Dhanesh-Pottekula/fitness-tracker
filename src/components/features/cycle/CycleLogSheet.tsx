@@ -1,4 +1,6 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
+import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { BottomSheet, PressableOpacity } from '@/src/components/ui';
@@ -8,10 +10,15 @@ import {
   FLOW_LEVELS,
   MOOD_OPTIONS,
   SYMPTOM_OPTIONS,
+  applyPeriodRange,
+  extractPeriods,
+  findPeriodContaining,
   flowColor,
   flowLabel,
 } from '@/src/lib/cycle';
 import { colors, radius, spacing, typography } from '@/src/theme';
+
+import { PeriodRangeModal } from './PeriodRangeModal';
 
 export function CycleLogSheet({
   visible,
@@ -25,6 +32,13 @@ export function CycleLogSheet({
   const { data, setData } = useAppData();
   const entry: CycleDayEntry = data.cycle.daily[date] ?? {};
   const isPeriod = Boolean(entry.flow);
+  const [rangeOpen, setRangeOpen] = useState(false);
+
+  const containingPeriod = useMemo(() => {
+    if (!isPeriod) return null;
+    const periods = extractPeriods(data.cycle.daily);
+    return findPeriodContaining(periods, date);
+  }, [isPeriod, data.cycle.daily, date]);
 
   function writeEntry(next: CycleDayEntry) {
     const cleaned: CycleDayEntry = {};
@@ -110,9 +124,44 @@ export function CycleLogSheet({
     ]);
   }
 
+  function handleSaveRange(start: string, end: string) {
+    setData((prev) => ({
+      ...prev,
+      cycle: {
+        ...prev.cycle,
+        daily: applyPeriodRange(
+          prev.cycle.daily,
+          containingPeriod ? { start: containingPeriod.start, end: containingPeriod.end } : null,
+          { start, end },
+        ),
+      },
+    }));
+    setRangeOpen(false);
+  }
+
   return (
     <BottomSheet visible={visible} title={formatDateLabel(date)} onClose={onClose}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        {containingPeriod ? (
+          <PressableOpacity
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => undefined);
+              setRangeOpen(true);
+            }}
+            style={styles.periodRangeBanner}>
+            <View style={styles.periodRangeLeft}>
+              <Text style={styles.periodRangeLabel}>PERIOD RANGE</Text>
+              <Text style={styles.periodRangeDates}>
+                {formatRange(containingPeriod.start, containingPeriod.end)}
+              </Text>
+            </View>
+            <View style={styles.periodRangeRight}>
+              <Text style={styles.periodRangeEdit}>Edit</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.bloom} />
+            </View>
+          </PressableOpacity>
+        ) : null}
+
         <Text style={styles.sectionLabel}>PERIOD</Text>
         <PressableOpacity
           onPress={togglePeriod}
@@ -210,8 +259,28 @@ export function CycleLogSheet({
           </PressableOpacity>
         </View>
       </ScrollView>
+
+      <PeriodRangeModal
+        visible={rangeOpen}
+        title="Edit period range"
+        initialStart={containingPeriod?.start}
+        initialEnd={containingPeriod?.end}
+        onClose={() => setRangeOpen(false)}
+        onSave={handleSaveRange}
+      />
     </BottomSheet>
   );
+}
+
+function formatRange(start: string, end: string): string {
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(
+      new Date(y, m - 1, d),
+    );
+  };
+  if (start === end) return fmt(start);
+  return `${fmt(start)} – ${fmt(end)}`;
 }
 
 function formatDateLabel(iso: string): string {
@@ -362,5 +431,39 @@ const styles = StyleSheet.create({
   clearBtnText: {
     ...typography.caption,
     color: colors.inkMuted,
+  },
+  periodRangeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.card,
+    backgroundColor: colors.bloomTint,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.bloom,
+  },
+  periodRangeLeft: {
+    gap: 2,
+  },
+  periodRangeLabel: {
+    ...typography.kicker,
+    fontSize: 9,
+    color: colors.bloomDeep,
+  },
+  periodRangeDates: {
+    ...typography.subhead,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  periodRangeRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  periodRangeEdit: {
+    ...typography.subhead,
+    fontSize: 13,
+    color: colors.bloom,
   },
 });
