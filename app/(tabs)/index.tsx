@@ -1,12 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CycleStatusStrip } from '@/src/components/features/cycle';
 import { FoodPickerSheet } from '@/src/components/features/health';
+import { StaleBackupChip } from '@/src/components/features/settings';
 import { SpendForm } from '@/src/components/features/spends/SpendForm';
 import { Kicker, PressableOpacity, ProgressRule } from '@/src/components/ui';
 import { useAppData } from '@/src/data';
@@ -24,6 +25,7 @@ import { colors, radius, spacing, typography } from '@/src/theme';
 
 export default function HomeScreen() {
   const { data } = useAppData();
+  const router = useRouter();
   const today = todayIso();
   const monthKey = monthKeyFromDate();
 
@@ -84,8 +86,23 @@ export default function HomeScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
-        <Text style={styles.greeting}>{greeting.toUpperCase()}</Text>
-        <Text style={styles.heading}>{formatDayHeading(today)}</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.greeting}>{greeting.toUpperCase()}</Text>
+            <Text style={styles.heading}>{formatDayHeading(today)}</Text>
+          </View>
+          <PressableOpacity
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => undefined);
+              router.push('/settings');
+            }}
+            style={styles.settingsBtn}
+            hitSlop={8}>
+            <Ionicons name="settings-outline" size={20} color={colors.ink} />
+          </PressableOpacity>
+        </View>
+
+        <StaleBackupChip style={styles.staleChip} />
 
         <CycleStatusStrip style={styles.cycleStrip} />
 
@@ -434,6 +451,30 @@ const styles = StyleSheet.create({
   bottomPad: { height: 64 },
   cycleStrip: {
     marginBottom: spacing.sm,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  settingsBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.paperRaised,
+    borderColor: colors.rule,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: spacing.md,
+  },
+  staleChip: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
   },
 });
 
