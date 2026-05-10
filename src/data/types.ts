@@ -117,6 +117,37 @@ export interface SpendEntry {
 
 export type MonthlySpends = Record<string, SpendEntry[]>;
 
+export type FlowLevel = 'spotting' | 'light' | 'medium' | 'heavy';
+
+export type Mood = 'happy' | 'calm' | 'low' | 'irritable' | 'tired';
+
+export type Symptom =
+  | 'cramps'
+  | 'headache'
+  | 'bloating'
+  | 'fatigue'
+  | 'breastTender'
+  | 'acne'
+  | 'backPain'
+  | 'nausea';
+
+export interface CycleDayEntry {
+  flow?: FlowLevel;
+  mood?: Mood;
+  symptoms?: Symptom[];
+  note?: string;
+}
+
+export interface CycleSettings {
+  cycleLengthHint: number;
+  periodLengthHint: number;
+}
+
+export interface CycleData {
+  daily: Record<string, CycleDayEntry>;
+  settings: CycleSettings;
+}
+
 export interface AppData {
   ribbons: Ribbon[];
   creditCards: CreditCard[];
@@ -125,4 +156,5 @@ export interface AppData {
   financeTransactions: FinanceTransaction[];
   physicalHealth: PhysicalHealth;
   monthlySpends: MonthlySpends;
+  cycle: CycleData;
 }

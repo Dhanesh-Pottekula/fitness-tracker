@@ -4,7 +4,7 @@ import { monthKeyFromDate } from '@/src/lib/date';
 import { mergeFoods, migrateDailyEntry } from '@/src/lib/physical-health';
 
 import { SEED } from './seed';
-import type { AppData, MonthlySpends, SpendEntry } from './types';
+import type { AppData, CycleData, MonthlySpends, SpendEntry } from './types';
 
 const KEY = 'finance-health-app-data-v1';
 
@@ -53,6 +53,17 @@ function mergeWithSeed(stored: Partial<AppData>): AppData {
       mealTemplates: physicalHealth.mealTemplates ?? [],
     },
     monthlySpends: mergeMonthlySpends(stored.monthlySpends),
+    cycle: mergeCycle(stored.cycle, seed.cycle),
+  };
+}
+
+function mergeCycle(stored: CycleData | undefined, seed: CycleData): CycleData {
+  return {
+    daily: stored?.daily ?? {},
+    settings: {
+      cycleLengthHint: stored?.settings?.cycleLengthHint ?? seed.settings.cycleLengthHint,
+      periodLengthHint: stored?.settings?.periodLengthHint ?? seed.settings.periodLengthHint,
+    },
   };
 }
 

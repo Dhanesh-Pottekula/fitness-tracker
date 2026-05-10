@@ -78,4 +78,8 @@ export const SEED: AppData = {
     mealTemplates: [],
   },
   monthlySpends: {},
+  cycle: {
+    daily: {},
+    settings: { cycleLengthHint: 28, periodLengthHint: 5 },
+  },
 };
