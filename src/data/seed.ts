@@ -82,4 +82,8 @@ export const SEED: AppData = {
     daily: {},
     settings: { cycleLengthHint: 28, periodLengthHint: 5 },
   },
+  meta: {
+    schemaVersion: 1,
+    lastBackupAt: null,
+  },
 };

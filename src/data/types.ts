@@ -148,6 +148,11 @@ export interface CycleData {
   settings: CycleSettings;
 }
 
+export interface AppMeta {
+  schemaVersion: number;
+  lastBackupAt: string | null;
+}
+
 export interface AppData {
   ribbons: Ribbon[];
   creditCards: CreditCard[];
@@ -157,4 +162,5 @@ export interface AppData {
   physicalHealth: PhysicalHealth;
   monthlySpends: MonthlySpends;
   cycle: CycleData;
+  meta: AppMeta;
 }

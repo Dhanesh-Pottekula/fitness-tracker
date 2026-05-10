@@ -4,7 +4,7 @@ import { monthKeyFromDate } from '@/src/lib/date';
 import { mergeFoods, migrateDailyEntry } from '@/src/lib/physical-health';
 
 import { SEED } from './seed';
-import type { AppData, CycleData, MonthlySpends, SpendEntry } from './types';
+import type { AppData, AppMeta, CycleData, MonthlySpends, SpendEntry } from './types';
 
 const KEY = 'finance-health-app-data-v1';
 
@@ -54,6 +54,14 @@ function mergeWithSeed(stored: Partial<AppData>): AppData {
     },
     monthlySpends: mergeMonthlySpends(stored.monthlySpends),
     cycle: mergeCycle(stored.cycle, seed.cycle),
+    meta: mergeMeta(stored.meta, seed.meta),
+  };
+}
+
+function mergeMeta(stored: AppMeta | undefined, seed: AppMeta): AppMeta {
+  return {
+    schemaVersion: stored?.schemaVersion ?? seed.schemaVersion,
+    lastBackupAt: stored?.lastBackupAt ?? seed.lastBackupAt,
   };
 }
 
