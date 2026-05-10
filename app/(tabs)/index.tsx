@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CycleStatusStrip } from '@/src/components/features/cycle';
 import { FoodPickerSheet } from '@/src/components/features/health';
 import { SpendForm } from '@/src/components/features/spends/SpendForm';
 import { Kicker, PressableOpacity, ProgressRule } from '@/src/components/ui';
@@ -85,6 +86,8 @@ export default function HomeScreen() {
         keyboardShouldPersistTaps="handled">
         <Text style={styles.greeting}>{greeting.toUpperCase()}</Text>
         <Text style={styles.heading}>{formatDayHeading(today)}</Text>
+
+        <CycleStatusStrip style={styles.cycleStrip} />
 
         {/* ───────────── Health pulse card ───────────── */}
         <View style={styles.pulseCard}>
@@ -429,6 +432,9 @@ const styles = StyleSheet.create({
   },
 
   bottomPad: { height: 64 },
+  cycleStrip: {
+    marginBottom: spacing.sm,
+  },
 });
 
 const macroStyles = StyleSheet.create({
