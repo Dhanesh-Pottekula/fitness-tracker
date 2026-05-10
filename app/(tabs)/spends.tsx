@@ -3,10 +3,14 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -27,6 +31,7 @@ import {
   entrySignedAmount,
   getFriendBalances,
   isEarning,
+  isFriendTagged,
   isSpend,
   removeEntryFromMonthlySpends,
   sortSpendEntries,
@@ -45,6 +50,8 @@ export default function SpendsScreen() {
   const [view, setView] = useState<View2>('spend');
   const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set());
   const [selectedFriend, setSelectedFriend] = useState<string | null>(null);
+  const [settling, setSettling] = useState<{ name: string; balance: number } | null>(null);
+  const [settleAmount, setSettleAmount] = useState('');
 
   const { width } = useWindowDimensions();
   const chartWidth = width - spacing.lg * 2;
@@ -128,7 +135,7 @@ export default function SpendsScreen() {
     const all: SpendEntry[] = [];
     for (const entries of Object.values(data.monthlySpends)) {
       for (const entry of entries) {
-        if (entry.details?.transaction?.friend?.trim()) all.push(entry);
+        if (isFriendTagged(entry)) all.push(entry);
       }
     }
     return all.sort((a, b) => {
@@ -147,6 +154,68 @@ export default function SpendsScreen() {
   function toggleFriend(name: string) {
     Haptics.selectionAsync().catch(() => undefined);
     setSelectedFriend((prev) => (prev === name ? null : name));
+  }
+
+  function openSettle(name: string, balance: number) {
+    if (balance === 0) return;
+    Haptics.selectionAsync().catch(() => undefined);
+    setSettling({ name, balance });
+    setSettleAmount(String(Math.abs(balance)));
+  }
+
+  function closeSettle() {
+    setSettling(null);
+    setSettleAmount('');
+  }
+
+  function applyFullSettle() {
+    if (!settling) return;
+    Haptics.selectionAsync().catch(() => undefined);
+    setSettleAmount(String(Math.abs(settling.balance)));
+  }
+
+  function confirmSettle() {
+    if (!settling) return;
+    const amount = Number(settleAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const outstanding = Math.abs(settling.balance);
+    const cappedAmount = Math.min(amount, outstanding);
+    const isPartial = cappedAmount < outstanding;
+    const isReceiving = settling.balance > 0;
+    const signed = isReceiving ? cappedAmount : -cappedAmount;
+    const targetMonthKey = monthKeyFromDate();
+    const now = new Date();
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+
+    setData((prev) => ({
+      ...prev,
+      monthlySpends: {
+        ...prev.monthlySpends,
+        [targetMonthKey]: [
+          ...(prev.monthlySpends[targetMonthKey] ?? []),
+          {
+            id: `settle-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: isPartial ? `Partial settle with ${settling.name}` : `Settled with ${settling.name}`,
+            amount: cappedAmount,
+            recurring: false,
+            details: {
+              transaction: {
+                date: now.toISOString(),
+                time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+                category: 'Settlement',
+                subCategory: isReceiving ? 'Repaid by friend' : 'Repaid to friend',
+                note: isPartial ? 'Partial settlement' : 'Auto-settled',
+                amount: signed,
+                friend: settling.name,
+              },
+            },
+          },
+        ],
+      },
+    }));
+
+    closeSettle();
   }
 
   function openNewForm() {
@@ -249,15 +318,16 @@ export default function SpendsScreen() {
                 const amount = settled ? '—' : formatINR(Math.abs(friend.balance));
                 const isSelected = selectedFriend === friend.name;
                 return (
-                  <PressableOpacity
+                  <Pressable
                     key={friend.name}
                     onPress={() => toggleFriend(friend.name)}
-                    style={[
+                    style={({ pressed }) => [
                       styles.friendRow,
                       isSelected && {
                         backgroundColor: colors.surfaceTint,
                         borderColor: tone,
                       },
+                      pressed && { opacity: 0.7 },
                     ]}>
                     <View style={styles.friendLeft}>
                       <Text style={styles.friendName} numberOfLines={1}>
@@ -271,7 +341,19 @@ export default function SpendsScreen() {
                       <Text style={[styles.friendLabel, { color: tone }]}>{label}</Text>
                       <Text style={[styles.friendAmount, { color: tone }]}>{amount}</Text>
                     </View>
-                  </PressableOpacity>
+                    {!settled ? (
+                      <Pressable
+                        onPress={() => openSettle(friend.name, friend.balance)}
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          styles.settleBtn,
+                          { borderColor: tone },
+                          pressed && { backgroundColor: `${tone}22` },
+                        ]}>
+                        <Ionicons name="checkmark-done" size={16} color={tone} />
+                      </Pressable>
+                    ) : null}
+                  </Pressable>
                 );
               })}
               {selectedFriend ? (
@@ -487,6 +569,98 @@ export default function SpendsScreen() {
         editingEntry={editingEntry}
         onClose={closeForm}
       />
+
+      <Modal
+        visible={settling !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSettle}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.settleBackdropWrap}>
+          <Pressable style={styles.settleBackdrop} onPress={closeSettle} />
+          <Pressable style={styles.settleCard} onPress={(e) => e.stopPropagation()}>
+            {settling ? (
+              (() => {
+                const isReceiving = settling.balance > 0;
+                const tone = isReceiving ? colors.success : colors.danger;
+                const outstanding = Math.abs(settling.balance);
+                const parsed = Number(settleAmount);
+                const valid = Number.isFinite(parsed) && parsed > 0;
+                const capped = valid ? Math.min(parsed, outstanding) : 0;
+                const isPartial = valid && capped < outstanding;
+                const isOver = valid && parsed > outstanding;
+                return (
+                  <>
+                    <Text style={styles.settleEyebrow}>SETTLE WITH {settling.name.toUpperCase()}</Text>
+                    <Text style={styles.settleDirection}>
+                      {isReceiving
+                        ? `${settling.name} pays you back`
+                        : `You pay ${settling.name} back`}
+                    </Text>
+
+                    <View style={styles.settleAmountRow}>
+                      <Text style={[styles.settleCurrency, { color: tone }]}>₹</Text>
+                      <TextInput
+                        autoFocus
+                        value={settleAmount}
+                        onChangeText={setSettleAmount}
+                        keyboardType="decimal-pad"
+                        style={[styles.settleAmountInput, { color: tone }]}
+                        selectionColor={tone}
+                        maxLength={9}
+                      />
+                    </View>
+
+                    <Text style={styles.settleHint}>
+                      Outstanding {formatINR(outstanding)}
+                      {valid
+                        ? isOver
+                          ? ' · only outstanding will be settled'
+                          : isPartial
+                          ? ` · partial · remaining ${formatINR(outstanding - capped)}`
+                          : ' · full settlement'
+                        : ''}
+                    </Text>
+
+                    <View style={styles.settleQuickRow}>
+                      <PressableOpacity onPress={applyFullSettle} style={styles.settleQuickChip}>
+                        <Text style={styles.settleQuickText}>Full · {formatINR(outstanding)}</Text>
+                      </PressableOpacity>
+                      <PressableOpacity
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => undefined);
+                          setSettleAmount(String(Math.round(outstanding / 2)));
+                        }}
+                        style={styles.settleQuickChip}>
+                        <Text style={styles.settleQuickText}>Half · {formatINR(Math.round(outstanding / 2))}</Text>
+                      </PressableOpacity>
+                    </View>
+
+                    <View style={styles.settleActions}>
+                      <PressableOpacity onPress={closeSettle} style={styles.settleCancel}>
+                        <Text style={styles.settleCancelText}>Cancel</Text>
+                      </PressableOpacity>
+                      <PressableOpacity
+                        onPress={confirmSettle}
+                        disabled={!valid}
+                        style={[
+                          styles.settleConfirm,
+                          { backgroundColor: tone },
+                          !valid && { opacity: 0.4 },
+                        ]}>
+                        <Text style={styles.settleConfirmText}>
+                          Settle {valid ? formatINR(capped) : ''}
+                        </Text>
+                      </PressableOpacity>
+                    </View>
+                  </>
+                );
+              })()
+            ) : null}
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -689,6 +863,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     backgroundColor: colors.paperRaised,
     marginBottom: 4,
+    gap: spacing.xs,
   },
   friendLeft: { flex: 1, gap: 2 },
   friendName: { ...typography.subhead, color: colors.ink, fontSize: 15 },
@@ -696,6 +871,15 @@ const styles = StyleSheet.create({
   friendRight: { alignItems: 'flex-end', gap: 2 },
   friendLabel: { ...typography.kicker, fontSize: 9 },
   friendAmount: { ...typography.metric, fontSize: 16 },
+  settleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
   clearFriendBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -775,4 +959,115 @@ const styles = StyleSheet.create({
   settlementFriend: { ...typography.subhead, color: colors.ink, fontSize: 14 },
   settlementMeta: { ...typography.caption, color: colors.inkMuted, fontSize: 11 },
   settlementAmount: { ...typography.metric, fontSize: 16 },
+
+  settleBackdropWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settleBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(29,29,31,0.5)',
+  },
+  settleCard: {
+    width: '88%',
+    maxWidth: 380,
+    backgroundColor: colors.paperRaised,
+    borderRadius: 22,
+    padding: 22,
+    gap: 6,
+    shadowColor: colors.ink,
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  settleEyebrow: {
+    ...typography.kicker,
+    fontSize: 10,
+    color: colors.inkMuted,
+  },
+  settleDirection: {
+    ...typography.body,
+    fontSize: 15,
+    color: colors.inkSoft,
+    marginBottom: 4,
+  },
+  settleAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: 12,
+  },
+  settleCurrency: {
+    ...typography.hero,
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  settleAmountInput: {
+    ...typography.hero,
+    fontSize: 44,
+    lineHeight: 48,
+    minWidth: 80,
+    paddingVertical: 0,
+    fontVariant: ['tabular-nums'],
+  },
+  settleHint: {
+    ...typography.caption,
+    fontSize: 12,
+    color: colors.inkMuted,
+    textAlign: 'center',
+  },
+  settleQuickRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  settleQuickChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.paperRecessed,
+    borderColor: colors.rule,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  settleQuickText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.inkSoft,
+    fontVariant: ['tabular-nums'],
+  },
+  settleActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  settleCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    backgroundColor: colors.paperRecessed,
+  },
+  settleCancelText: {
+    ...typography.subhead,
+    fontSize: 14,
+    color: colors.inkSoft,
+  },
+  settleConfirm: {
+    flex: 2,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+  },
+  settleConfirmText: {
+    ...typography.subhead,
+    fontSize: 14,
+    color: colors.paperRaised,
+  },
 });

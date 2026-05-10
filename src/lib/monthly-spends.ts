@@ -29,6 +29,14 @@ export function isSpend(entry: SpendEntry): boolean {
   return entrySignedAmount(entry) < 0;
 }
 
+export function isFriendTagged(entry: SpendEntry): boolean {
+  return Boolean(entry.details?.transaction?.friend?.trim());
+}
+
+export function excludeFriendTagged(entries: SpendEntry[]): SpendEntry[] {
+  return entries.filter((e) => !isFriendTagged(e));
+}
+
 function monthKeysBetween(startMonth: string, endMonth: string): string[] {
   const [sy, sm] = startMonth.split('-').map(Number);
   const [ey, em] = endMonth.split('-').map(Number);
