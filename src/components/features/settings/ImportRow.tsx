@@ -6,12 +6,13 @@ import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { PressableOpacity } from '@/src/components/ui';
 import { useAppData } from '@/src/data';
-import { parseBackup, summarizeEnvelope } from '@/src/lib/backup';
-import type { BackupSummary } from '@/src/lib/backup';
+import { parseBackup } from '@/src/lib/backup';
+import { mergeAppData, summarizeMerge } from '@/src/lib/merge';
+import type { MergeStats } from '@/src/lib/merge';
 import { colors, radius, spacing, typography } from '@/src/theme';
 
 export function ImportRow() {
-  const { setData } = useAppData();
+  const { data, setData } = useAppData();
 
   async function handleImport() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
@@ -19,7 +20,7 @@ export function ImportRow() {
     const proceed = await new Promise<boolean>((resolve) => {
       Alert.alert(
         'Import a backup?',
-        'This will replace all current data. You cannot undo this.',
+        'It will be merged with your current data. Nothing will be deleted.',
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Continue', onPress: () => resolve(true) },
@@ -61,20 +62,27 @@ export function ImportRow() {
       return;
     }
 
-    const summary = summarizeEnvelope(result.envelope);
-    const summaryLine = formatSummary(summary);
+    const stats = summarizeMerge(data, result.envelope.data);
+    const exportedDateLabel = result.envelope._exportedAt
+      ? new Intl.DateTimeFormat('en-IN', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }).format(new Date(result.envelope._exportedAt))
+      : 'Unknown date';
+    const summaryMessage = formatMergeSummary(exportedDateLabel, stats);
 
-    const confirmReplace = await new Promise<boolean>((resolve) => {
-      Alert.alert('Replace current data?', summaryLine, [
+    const confirmMerge = await new Promise<boolean>((resolve) => {
+      Alert.alert('Merge backup?', summaryMessage, [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-        { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+        { text: 'Merge', onPress: () => resolve(true) },
       ]);
     });
-    if (!confirmReplace) return;
+    if (!confirmMerge) return;
 
-    setData(result.envelope.data);
+    setData((prev) => mergeAppData(prev, result.envelope.data));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-    Alert.alert('Data imported', 'Your backup has been restored.');
+    Alert.alert('Backup merged', 'Your backup has been merged with your data.');
   }
 
   return (
@@ -84,28 +92,64 @@ export function ImportRow() {
       </View>
       <View style={styles.copy}>
         <Text style={styles.title}>Import data</Text>
-        <Text style={styles.subtitle}>Replace current data with a backup file.</Text>
+        <Text style={styles.subtitle}>
+          Merge a backup file with your current data. Nothing is deleted.
+        </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={colors.inkMuted} />
     </PressableOpacity>
   );
 }
 
-function formatSummary(summary: BackupSummary): string {
-  const dateLabel = summary.exportedAt
-    ? new Intl.DateTimeFormat('en-IN', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      }).format(new Date(summary.exportedAt))
-    : 'Unknown date';
-  const parts = [
-    `${summary.cycleDays} cycle ${summary.cycleDays === 1 ? 'day' : 'days'}`,
-    `${summary.periods} ${summary.periods === 1 ? 'period' : 'periods'}`,
-    `${summary.transactions} ${summary.transactions === 1 ? 'transaction' : 'transactions'}`,
-    `${summary.meals} ${summary.meals === 1 ? 'meal' : 'meals'}`,
-  ];
-  return `Backup from ${dateLabel}\n\n${parts.join(' · ')}`;
+function formatMergeSummary(dateLabel: string, stats: MergeStats): string {
+  const addParts: string[] = [];
+  if (stats.added.transactions > 0) {
+    addParts.push(
+      `${stats.added.transactions} ${stats.added.transactions === 1 ? 'transaction' : 'transactions'}`,
+    );
+  }
+  if (stats.added.cycleDays > 0) {
+    addParts.push(`${stats.added.cycleDays} cycle ${stats.added.cycleDays === 1 ? 'day' : 'days'}`);
+  }
+  if (stats.added.meals > 0) {
+    addParts.push(`${stats.added.meals} ${stats.added.meals === 1 ? 'meal' : 'meals'}`);
+  }
+  if (stats.added.foods > 0) {
+    addParts.push(`${stats.added.foods} ${stats.added.foods === 1 ? 'food' : 'foods'}`);
+  }
+  if (stats.added.loans > 0) {
+    addParts.push(`${stats.added.loans} ${stats.added.loans === 1 ? 'loan' : 'loans'}`);
+  }
+  if (stats.added.mealTemplates > 0) {
+    addParts.push(
+      `${stats.added.mealTemplates} ${stats.added.mealTemplates === 1 ? 'meal template' : 'meal templates'}`,
+    );
+  }
+
+  const existingParts: string[] = [];
+  if (stats.existing.transactions > 0) {
+    existingParts.push(
+      `${stats.existing.transactions} ${stats.existing.transactions === 1 ? 'transaction' : 'transactions'}`,
+    );
+  }
+  if (stats.existing.cycleDays > 0) {
+    existingParts.push(
+      `${stats.existing.cycleDays} cycle ${stats.existing.cycleDays === 1 ? 'day' : 'days'}`,
+    );
+  }
+  if (stats.existing.meals > 0) {
+    existingParts.push(
+      `${stats.existing.meals} ${stats.existing.meals === 1 ? 'meal' : 'meals'}`,
+    );
+  }
+
+  const lines: string[] = [`From ${dateLabel}`];
+  lines.push(addParts.length > 0 ? `Will add: ${addParts.join(' · ')}` : 'Nothing new to add.');
+  if (existingParts.length > 0) {
+    lines.push(`Already present: ${existingParts.join(' · ')}`);
+  }
+  lines.push('Nothing will be deleted.');
+  return lines.join('\n\n');
 }
 
 const styles = StyleSheet.create({
