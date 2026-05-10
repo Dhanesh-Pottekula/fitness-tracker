@@ -18,6 +18,13 @@ export const colors = {
   danger: '#c83a3a',
   successTint: 'rgba(47,138,74,0.08)',
   dangerTint: 'rgba(200,58,58,0.08)',
+  bloom: '#c8526b',
+  bloomDeep: '#9d3f56',
+  bloomTint: 'rgba(200, 82, 107, 0.10)',
+  flowSpotting: '#e8b9c4',
+  flowLight: '#d88498',
+  flowMedium: '#c8526b',
+  flowHeavy: '#9d3f56',
 };
 
 export const chartCycle = [colors.clay, colors.sage, colors.ochre, colors.slate, '#8a7a9c'];
