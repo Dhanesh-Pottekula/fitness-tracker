@@ -12,6 +12,7 @@
       "supportsTablet": false
     },
     "android": {
+      "package": "in.airaai.financehealth",
       "adaptiveIcon": {
         "backgroundColor": "#faf6ef",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
