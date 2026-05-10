@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CycleSection, CycleStatusStrip } from '@/src/components/features/cycle';
 import {
   CalorieRing,
   FoodPickerSheet,
@@ -123,6 +124,8 @@ export default function HealthScreen() {
           </View>
         </View>
 
+        <CycleStatusStrip style={styles.cycleStrip} />
+
         <CalorieRing value={macros.kcal} target={targets.calories} />
 
         <View style={styles.macroRow}>
@@ -162,6 +165,8 @@ export default function HealthScreen() {
             ))}
           </View>
         )}
+
+        <CycleSection />
 
         <Kicker>Trends</Kicker>
         <MetricBarChart
@@ -270,5 +275,9 @@ const styles = StyleSheet.create({
   },
   bottomPad: {
     height: 96,
+  },
+  cycleStrip: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
 });
