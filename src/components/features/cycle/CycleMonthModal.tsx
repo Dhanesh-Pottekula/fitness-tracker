@@ -1,12 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { useMemo, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAppData } from '@/src/data';
 import { PressableOpacity } from '@/src/components/ui';
 import type { CycleDayEntry } from '@/src/data/types';
-import { flowColor } from '@/src/lib/cycle';
+import { cycleStats, flowColor, monthPeriodSpans } from '@/src/lib/cycle';
 import {
   formatMonthLabel,
   isoDatesInMonth,
@@ -15,6 +16,9 @@ import {
   previousMonthKey,
 } from '@/src/lib/date';
 import { colors, radius, spacing, typography } from '@/src/theme';
+
+import { CalendarSummary } from './CalendarSummary';
+import { DayPreviewPanel } from './DayPreviewPanel';
 
 const WEEKDAY_HEADERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -33,14 +37,32 @@ export function CycleMonthModal({
   onClose: () => void;
   onDayPress: (iso: string) => void;
 }) {
+  const { data } = useAppData();
   const [monthKey, setMonthKey] = useState(monthKeyFromDate());
+  const [selectedIso, setSelectedIso] = useState<string | null>(null);
   const predictedSet = useMemo(() => new Set(predictedDates), [predictedDates]);
 
+  useEffect(() => {
+    if (visible) setSelectedIso(null);
+  }, [visible]);
+
   const cells = useMemo(() => buildMonthCells(monthKey), [monthKey]);
+  const stats = useMemo(
+    () => cycleStats(daily, data.cycle.settings),
+    [daily, data.cycle.settings],
+  );
+  const monthPeriods = useMemo(() => monthPeriodSpans(daily, monthKey), [daily, monthKey]);
+  const monthSummaryText = useMemo(
+    () => buildMonthSummary(monthKey, monthPeriods),
+    [monthKey, monthPeriods],
+  );
+
+  const selectedEntry = selectedIso ? daily[selectedIso] : null;
 
   function go(delta: number) {
     Haptics.selectionAsync().catch(() => undefined);
     setMonthKey((prev) => (delta > 0 ? nextMonthKey(prev) : previousMonthKey(prev)));
+    setSelectedIso(null);
   }
 
   function handleCellPress(iso: string, isFuture: boolean) {
@@ -49,69 +71,106 @@ export function CycleMonthModal({
       return;
     }
     Haptics.selectionAsync().catch(() => undefined);
-    onDayPress(iso);
+    const entry = daily[iso];
+    const hasData =
+      entry &&
+      (entry.flow ||
+        entry.mood ||
+        (entry.symptoms && entry.symptoms.length > 0) ||
+        entry.note);
+    if (hasData) {
+      setSelectedIso((prev) => (prev === iso ? null : iso));
+    } else {
+      onDayPress(iso);
+    }
+  }
+
+  function openEditFromPreview() {
+    if (!selectedIso) return;
+    onDayPress(selectedIso);
   }
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.safe}>
-        <View style={styles.header}>
-          <PressableOpacity onPress={() => go(-1)} style={styles.navBtn} hitSlop={8}>
-            <Ionicons name="chevron-back" size={20} color={colors.ink} />
-          </PressableOpacity>
-          <Text style={styles.headerTitle}>{formatMonthLabel(monthKey)}</Text>
-          <PressableOpacity onPress={() => go(1)} style={styles.navBtn} hitSlop={8}>
-            <Ionicons name="chevron-forward" size={20} color={colors.ink} />
-          </PressableOpacity>
-        </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+          <View style={styles.header}>
+            <PressableOpacity onPress={() => go(-1)} style={styles.navBtn} hitSlop={8}>
+              <Ionicons name="chevron-back" size={20} color={colors.ink} />
+            </PressableOpacity>
+            <Text style={styles.headerTitle}>{formatMonthLabel(monthKey)}</Text>
+            <PressableOpacity onPress={() => go(1)} style={styles.navBtn} hitSlop={8}>
+              <Ionicons name="chevron-forward" size={20} color={colors.ink} />
+            </PressableOpacity>
+          </View>
 
-        <View style={styles.weekHeaderRow}>
-          {WEEKDAY_HEADERS.map((label, idx) => (
-            <Text key={`${label}-${idx}`} style={styles.weekHeader}>
-              {label}
-            </Text>
-          ))}
-        </View>
+          <CalendarSummary stats={stats} />
 
-        <View style={styles.grid}>
-          {cells.map((cell, idx) => {
-            if (!cell) {
-              return <View key={`blank-${idx}`} style={styles.cellBlank} />;
-            }
-            const entry = daily[cell.iso];
-            const isPredicted = predictedSet.has(cell.iso) && cell.isFuture;
-            const isToday = cell.iso === today;
-            const dotColor = entry?.flow ? flowColor(entry.flow) : null;
-            return (
-              <Pressable
-                key={cell.iso}
-                onPress={() => handleCellPress(cell.iso, cell.isFuture)}
-                style={({ pressed }) => [
-                  styles.cell,
-                  isToday && styles.cellToday,
-                  cell.isFuture && styles.cellFuture,
-                  pressed && !cell.isFuture && { opacity: 0.6 },
-                ]}>
-                <Text style={[styles.cellNumber, isToday && styles.cellNumberToday]}>
-                  {cell.day}
-                </Text>
-                <View style={styles.dotWrap}>
-                  {dotColor ? (
-                    <View style={[styles.dotSolid, { backgroundColor: dotColor }]} />
-                  ) : isPredicted ? (
-                    <View style={styles.dotPredicted} />
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
+          {monthSummaryText ? (
+            <Text style={styles.monthSummary}>{monthSummaryText}</Text>
+          ) : null}
 
-        <View style={styles.legend}>
-          <LegendItem swatch={<View style={[styles.dotSolid, { backgroundColor: colors.bloom }]} />} label="Period" />
-          <LegendItem swatch={<View style={styles.dotPredicted} />} label="Predicted" />
-          <LegendItem swatch={<View style={styles.legendTodayBox} />} label="Today" />
-        </View>
+          <View style={styles.weekHeaderRow}>
+            {WEEKDAY_HEADERS.map((label, idx) => (
+              <Text key={`${label}-${idx}`} style={styles.weekHeader}>
+                {label}
+              </Text>
+            ))}
+          </View>
+
+          <View style={styles.grid}>
+            {cells.map((cell, idx) => {
+              if (!cell) return <View key={`blank-${idx}`} style={styles.cellBlank} />;
+              const entry = daily[cell.iso];
+              const isPredicted = predictedSet.has(cell.iso) && cell.isFuture;
+              const isToday = cell.iso === today;
+              const isSelected = selectedIso === cell.iso;
+              const dotColor = entry?.flow ? flowColor(entry.flow) : null;
+              return (
+                <Pressable
+                  key={cell.iso}
+                  onPress={() => handleCellPress(cell.iso, cell.isFuture)}
+                  style={({ pressed }) => [
+                    styles.cell,
+                    isToday && styles.cellToday,
+                    isSelected && styles.cellSelected,
+                    cell.isFuture && styles.cellFuture,
+                    pressed && !cell.isFuture && { opacity: 0.6 },
+                  ]}>
+                  <Text style={[styles.cellNumber, isToday && styles.cellNumberToday]}>
+                    {cell.day}
+                  </Text>
+                  <View style={styles.dotWrap}>
+                    {dotColor ? (
+                      <View style={[styles.dotSolid, { backgroundColor: dotColor }]} />
+                    ) : isPredicted ? (
+                      <View style={styles.dotPredicted} />
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.legend}>
+            <LegendItem
+              swatch={<View style={[styles.dotSolid, { backgroundColor: colors.bloom }]} />}
+              label="Period"
+            />
+            <LegendItem swatch={<View style={styles.dotPredicted} />} label="Predicted" />
+            <LegendItem swatch={<View style={styles.legendTodayBox} />} label="Today" />
+          </View>
+
+          {selectedIso && selectedEntry ? (
+            <DayPreviewPanel
+              iso={selectedIso}
+              entry={selectedEntry}
+              onEdit={openEditFromPreview}
+            />
+          ) : (
+            <Text style={styles.hint}>Tap a logged day to see details · tap an empty day to log</Text>
+          )}
+        </ScrollView>
 
         <View style={styles.footer}>
           <PressableOpacity onPress={onClose} style={styles.doneBtn}>
@@ -160,10 +219,38 @@ function buildMonthCells(monthKey: string): (Cell | null)[] {
   return cells;
 }
 
+function buildMonthSummary(
+  monthKey: string,
+  periods: { start: string; end: string }[],
+): string | null {
+  if (periods.length === 0) return null;
+  const totalDays = periods.reduce((acc, p) => {
+    const [ys, ms, ds] = p.start.split('-').map(Number);
+    const [ye, me, de] = p.end.split('-').map(Number);
+    const days =
+      Math.round(
+        (new Date(ye, me - 1, de).getTime() - new Date(ys, ms - 1, ds).getTime()) / 86_400_000,
+      ) + 1;
+    return acc + days;
+  }, 0);
+  const periodsLabel = periods.length === 1 ? '1 period' : `${periods.length} periods`;
+  const daysLabel = totalDays === 1 ? '1 day' : `${totalDays} days`;
+  const monthName = formatMonthLabel(monthKey).split(' ')[0];
+  const firstStart = periods[0].start;
+  const [y, m, d] = firstStart.split('-').map(Number);
+  const startedLabel = new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(
+    new Date(y, m - 1, d),
+  );
+  return `${monthName}: ${periodsLabel} · ${daysLabel} · started ${startedLabel}`;
+}
+
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.paper,
+  },
+  scroll: {
+    paddingBottom: spacing.md,
   },
   header: {
     flexDirection: 'row',
@@ -186,9 +273,17 @@ const styles = StyleSheet.create({
     ...typography.heading,
     color: colors.ink,
   },
+  monthSummary: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    textAlign: 'center',
+  },
   weekHeaderRow: {
     flexDirection: 'row',
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xs,
   },
   weekHeader: {
@@ -213,6 +308,10 @@ const styles = StyleSheet.create({
   },
   cellToday: {
     backgroundColor: colors.paperRaised,
+    borderRadius: radius.card,
+  },
+  cellSelected: {
+    backgroundColor: colors.bloomTint,
     borderRadius: radius.card,
   },
   cellFuture: {
@@ -274,10 +373,19 @@ const styles = StyleSheet.create({
     borderColor: colors.rule,
     borderWidth: 1,
   },
+  hint: {
+    ...typography.caption,
+    color: colors.inkMuted,
+    textAlign: 'center',
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
   footer: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
+    borderTopColor: colors.rule,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   doneBtn: {
     paddingVertical: spacing.md,
