@@ -39,6 +39,7 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }}>
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="loan/[id]" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
             </Stack>
             <StatusBar style="dark" />
           </SafeAreaProvider>
