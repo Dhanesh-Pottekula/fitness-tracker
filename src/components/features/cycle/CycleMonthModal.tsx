@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppData } from '@/src/data';
 import { PressableOpacity } from '@/src/components/ui';
 import type { CycleDayEntry } from '@/src/data/types';
-import { cycleStats, flowColor, monthPeriodSpans } from '@/src/lib/cycle';
+import { cycleStats, extractPeriods, flowColor, monthPeriodSpans } from '@/src/lib/cycle';
 import {
   formatMonthLabel,
   isoDatesInMonth,
@@ -43,8 +43,12 @@ export function CycleMonthModal({
   const predictedSet = useMemo(() => new Set(predictedDates), [predictedDates]);
 
   useEffect(() => {
-    if (visible) setSelectedIso(null);
-  }, [visible]);
+    if (!visible) return;
+    setSelectedIso(null);
+    const periods = extractPeriods(daily);
+    const lastPeriodStart = periods.length > 0 ? periods[periods.length - 1].start : null;
+    setMonthKey(lastPeriodStart ? lastPeriodStart.slice(0, 7) : monthKeyFromDate());
+  }, [visible, daily]);
 
   const cells = useMemo(() => buildMonthCells(monthKey), [monthKey]);
   const stats = useMemo(
